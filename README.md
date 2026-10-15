@@ -21,6 +21,28 @@ Go 1.23 or later.
 
 ## Installation
 
+### Offline signing of prepared v1 transactions
+
+This fork adds Toccata/v1 support to the existing offline `kaspawallet sign`
+command. An external coordinator prepares the PST, including its lane ID,
+payload, outputs, and per-input compute budgets. Each cosigner can sign the
+same unsigned file independently:
+
+```sh
+kaspawallet sign --keys-file signer.json --transaction-file unsigned.hex > signed.hex
+```
+
+The wallet prompts for the local wallet password. It preserves the prepared
+transaction fields and uses the v1 signing hash. PST compute budgets use input
+field 6, matching the existing Igra Foundry format. Output covenant bindings
+are also preserved and included in the v1 signing hash.
+
+This is an offline-signing change. The legacy Go node, transaction-ID/hash
+functions, transaction creation, and online wallet workflows have not been
+upgraded to v1. Use the Rust coordinator/node for signature and script checks,
+compute-budget and fee validation, transaction IDs, merging, and broadcast.
+Existing v0 signing remains supported.
+
 #### Build from Source
 
 - Install Go according to the installation instructions here:

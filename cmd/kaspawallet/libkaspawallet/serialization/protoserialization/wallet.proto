@@ -40,6 +40,7 @@ message TransactionInput{
   bytes signatureScript = 2;
   uint64 sequence = 3;
   uint32 sigOpCount = 4;
+  uint32 computeBudget = 6;
 }
 
 message Outpoint{
@@ -58,4 +59,10 @@ message ScriptPublicKey {
 message TransactionOutput{
   uint64 value = 1;
   ScriptPublicKey scriptPublicKey = 2;
+  CovenantBinding covenant = 3;
+}
+
+message CovenantBinding{
+  uint32 authorizingInput = 1;
+  string covenantId = 2;
 }

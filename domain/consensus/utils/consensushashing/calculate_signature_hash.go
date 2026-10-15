@@ -1,6 +1,8 @@
 package consensushashing
 
 import (
+	"math"
+
 	"github.com/kaspanet/kaspad/domain/consensus/model/externalapi"
 	"github.com/kaspanet/kaspad/domain/consensus/utils/hashes"
 	"github.com/kaspanet/kaspad/domain/consensus/utils/serialization"
@@ -103,8 +105,10 @@ func calculateSignatureHash(tx *externalapi.DomainTransaction, inputIndex int, t
 	sequencesHash := getSequencesHash(tx, hashType, reusedValues)
 	infallibleWriteElement(hashWriter, sequencesHash)
 
-	sigOpCountsHash := getSigOpCountsHash(tx, hashType, reusedValues)
-	infallibleWriteElement(hashWriter, sigOpCountsHash)
+	if tx.Version == 0 {
+		sigOpCountsHash := getSigOpCountsHash(tx, hashType, reusedValues)
+		infallibleWriteElement(hashWriter, sigOpCountsHash)
+	}
 
 	hashOutpoint(hashWriter, txIn.PreviousOutpoint)
 
@@ -115,9 +119,14 @@ func calculateSignatureHash(tx *externalapi.DomainTransaction, inputIndex int, t
 
 	infallibleWriteElement(hashWriter, txIn.Sequence)
 
-	infallibleWriteElement(hashWriter, txIn.SigOpCount)
+	if tx.Version == 0 {
+		infallibleWriteElement(hashWriter, txIn.SigOpCount)
+	}
 
-	outputsHash := getOutputsHash(tx, inputIndex, hashType, reusedValues)
+	outputsHash, err := getOutputsHash(tx, inputIndex, hashType, reusedValues)
+	if err != nil {
+		return nil, err
+	}
 	infallibleWriteElement(hashWriter, outputsHash)
 
 	infallibleWriteElement(hashWriter, tx.LockTime)
@@ -181,32 +190,36 @@ func getSigOpCountsHash(tx *externalapi.DomainTransaction, hashType SigHashType,
 	return reusedValues.sigOpCountsHash
 }
 
-func getOutputsHash(tx *externalapi.DomainTransaction, inputIndex int, hashType SigHashType, reusedValues *SighashReusedValues) *externalapi.DomainHash {
+func getOutputsHash(tx *externalapi.DomainTransaction, inputIndex int, hashType SigHashType, reusedValues *SighashReusedValues) (*externalapi.DomainHash, error) {
 	// SigHashNone: return zero-hash
 	if hashType.isSigHashNone() {
-		return externalapi.NewZeroHash()
+		return externalapi.NewZeroHash(), nil
 	}
 
 	// SigHashSingle: If the relevant output exists - return it's hash, otherwise return zero-hash
 	if hashType.isSigHashSingle() {
 		if inputIndex >= len(tx.Outputs) {
-			return externalapi.NewZeroHash()
+			return externalapi.NewZeroHash(), nil
 		}
 		hashWriter := hashes.NewTransactionSigningHashWriter()
-		hashTxOut(hashWriter, tx.Outputs[inputIndex])
-		return hashWriter.Finalize()
+		if err := hashTxOut(hashWriter, tx.Outputs[inputIndex], tx.Version); err != nil {
+			return nil, err
+		}
+		return hashWriter.Finalize(), nil
 	}
 
 	// SigHashAll: Return hash of all outputs. Re-use hash if available.
 	if reusedValues.outputsHash == nil {
 		hashWriter := hashes.NewTransactionSigningHashWriter()
 		for _, txOut := range tx.Outputs {
-			hashTxOut(hashWriter, txOut)
+			if err := hashTxOut(hashWriter, txOut, tx.Version); err != nil {
+				return nil, err
+			}
 		}
 		reusedValues.outputsHash = hashWriter.Finalize()
 	}
 
-	return reusedValues.outputsHash
+	return reusedValues.outputsHash, nil
 }
 
 func getPayloadHash(tx *externalapi.DomainTransaction, reusedValues *SighashReusedValues) *externalapi.DomainHash {
@@ -222,10 +235,25 @@ func getPayloadHash(tx *externalapi.DomainTransaction, reusedValues *SighashReus
 	return reusedValues.payloadHash
 }
 
-func hashTxOut(hashWriter hashes.HashWriter, txOut *externalapi.DomainTransactionOutput) {
+func hashTxOut(hashWriter hashes.HashWriter, txOut *externalapi.DomainTransactionOutput, version uint16) error {
 	infallibleWriteElement(hashWriter, txOut.Value)
 	infallibleWriteElement(hashWriter, txOut.ScriptPublicKey.Version)
 	infallibleWriteElement(hashWriter, txOut.ScriptPublicKey.Script)
+	if version >= 1 {
+		infallibleWriteElement(hashWriter, txOut.Covenant != nil)
+		if txOut.Covenant != nil {
+			if txOut.Covenant.AuthorizingInput > math.MaxUint16 {
+				return errors.New("covenant authorizing input exceeds uint16")
+			}
+			id, err := externalapi.NewDomainHashFromString(txOut.Covenant.CovenantID)
+			if err != nil {
+				return err
+			}
+			infallibleWriteElement(hashWriter, uint16(txOut.Covenant.AuthorizingInput))
+			infallibleWriteElement(hashWriter, id)
+		}
+	}
+	return nil
 }
 
 func hashOutpoint(hashWriter hashes.HashWriter, outpoint externalapi.DomainOutpoint) {

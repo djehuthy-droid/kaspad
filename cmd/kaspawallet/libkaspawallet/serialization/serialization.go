@@ -248,6 +248,9 @@ func transactionInputFromProto(protoInput *protoserialization.TransactionInput) 
 	if protoInput.SigOpCount > math.MaxUint8 {
 		return nil, errors.New("TransactionInput SigOpCount > math.MaxUint8")
 	}
+	if protoInput.ComputeBudget > math.MaxUint16 {
+		return nil, errors.New("TransactionInput ComputeBudget > math.MaxUint16")
+	}
 
 	outpoint, err := outpointFromProto(protoInput.PreviousOutpoint)
 	if err != nil {
@@ -259,6 +262,7 @@ func transactionInputFromProto(protoInput *protoserialization.TransactionInput) 
 		SignatureScript:  protoInput.SignatureScript,
 		Sequence:         protoInput.Sequence,
 		SigOpCount:       byte(protoInput.SigOpCount),
+		ComputeBudget:    protoInput.ComputeBudget,
 	}, nil
 }
 
@@ -268,6 +272,7 @@ func transactionInputToProto(input *externalapi.DomainTransactionInput) *protose
 		SignatureScript:  input.SignatureScript,
 		Sequence:         input.Sequence,
 		SigOpCount:       uint32(input.SigOpCount),
+		ComputeBudget:    input.ComputeBudget,
 	}
 }
 
@@ -303,16 +308,38 @@ func transactionOutputFromProto(protoOutput *protoserialization.TransactionOutpu
 		return nil, err
 	}
 
+	var covenant *externalapi.DomainTransactionOutputCovenantBinding
+	if protoOutput.Covenant != nil {
+		if protoOutput.Covenant.AuthorizingInput > math.MaxUint16 {
+			return nil, errors.New("CovenantBinding AuthorizingInput > math.MaxUint16")
+		}
+		if _, err := externalapi.NewDomainHashFromString(protoOutput.Covenant.CovenantId); err != nil {
+			return nil, err
+		}
+		covenant = &externalapi.DomainTransactionOutputCovenantBinding{
+			AuthorizingInput: protoOutput.Covenant.AuthorizingInput,
+			CovenantID:       protoOutput.Covenant.CovenantId,
+		}
+	}
 	return &externalapi.DomainTransactionOutput{
 		Value:           protoOutput.Value,
 		ScriptPublicKey: scriptPublicKey,
+		Covenant:        covenant,
 	}, nil
 }
 
 func transactionOutputToProto(output *externalapi.DomainTransactionOutput) *protoserialization.TransactionOutput {
+	var covenant *protoserialization.CovenantBinding
+	if output.Covenant != nil {
+		covenant = &protoserialization.CovenantBinding{
+			AuthorizingInput: output.Covenant.AuthorizingInput,
+			CovenantId:       output.Covenant.CovenantID,
+		}
+	}
 	return &protoserialization.TransactionOutput{
 		Value:           output.Value,
 		ScriptPublicKey: scriptPublicKeyToProto(output.ScriptPublicKey),
+		Covenant:        covenant,
 	}
 }
 
